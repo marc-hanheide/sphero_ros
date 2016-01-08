@@ -37,6 +37,11 @@ import struct
 import time
 import operator
 import threading
+import platform
+
+from abc import ABCMeta, abstractmethod
+if "Linux" in platform.uname():         #Bluepy Bluetooth LE library currently only supported on Linux
+    from bluepy import btle, Scanner, DefaultDelegate
 
 #These are the message response code that can be return by Sphero.
 MRSP = dict(
@@ -158,8 +163,27 @@ STRM_MASK2 = dict(
   VELOCITY_X         = 0x01000000,
   VELOCITY_Y         = 0x00800000)
 
-
 class BTInterface(object):
+
+    __metaclass__ = ABCMeta
+
+    @abstractmethod
+    def connect(self):
+        pass
+
+    @abstractmethod
+    def send(self, data):
+        pass
+
+    @abstractmethod
+    def recv(self, num_bytes):
+        pass
+
+    @abstractmethod
+    def close(self):
+        pass
+
+class BTInterfaceClassic(BTInterface):
 
   def __init__(self, target_name = 'Sphero', target_addr = None, port = 1):
       self.target_name = target_name
@@ -220,12 +244,74 @@ class BTInterface(object):
   def close(self):
     self.sock.close()
 
+class BTInterfaceLE(BTInterface):
+
+  def __init__(self, target_name = 'BB', target_addr = None, port = 1):
+    self.target_name = target_name
+    self.port = port
+    self.found_device = False
+    self.tries = 0
+    self.target_address = target_addr
+    self.peripheral = None
+
+def connect(self):
+    if self.target_address is None:
+        sys.stdout.write("Searching for devices....")
+        sys.stdout.flush()
+
+        for i in range(10):
+          sys.stdout.write("....")
+          sys.stdout.flush()
+          nearby_devices = bluetooth.discover_devices(lookup_names = True)
+
+          if len(nearby_devices)>0:
+            for bdaddr, name in nearby_devices:
+              #look for a device name that starts with Sphero
+              if name.startswith(self.target_name):
+                self.found_device = True
+                self.target_address = bdaddr
+                break
+          if self.found_device:
+            break
+
+        if self.target_address is not None:
+          sys.stdout.write("\nFound Sphero device with address: %s\n" %  (self.target_address))
+          sys.stdout.flush()
+        else:
+          sys.stdout.write("\nNo Sphero devices found.\n" )
+          sys.stdout.flush()
+          sys.exit(1)
+    else:
+        sys.stdout.write("Connecting to device: " + self.target_address + "...")
+
+    try:
+      self.sock=bluetooth.BluetoothSocket(bluetooth.RFCOMM)
+      self.sock.connect((self.target_address,self.port))
+    except bluetooth.btcommon.BluetoothError as error:
+      sys.stdout.write(error.strerror)
+      sys.stdout.flush()
+      time.sleep(5.0)
+      sys.exit(1)
+    sys.stdout.write("Paired with Sphero.\n")
+    sys.stdout.flush()
+    return True
+
+  def send(self, data):
+    self.sock.send(data)
+
+  def recv(self, num_bytes):
+    return self.sock.recv(num_bytes)
+
+  def close(self):
+    self.sock.close()
+
 class Sphero(threading.Thread):
 
-  def __init__(self, target_name = 'Sphero', target_addr = None):
+  def __init__(self, target_name = 'Sphero', target_addr = None, ble = False):
     threading.Thread.__init__(self)
     self.target_name = target_name
     self.target_address = target_addr
+    self.ble = ble
     self.bt = None
     self.shutdown = False
     self.is_connected = False
@@ -239,8 +325,17 @@ class Sphero(threading.Thread):
     self._sync_callback_dict = dict()
     self._sync_callback_queue = []
 
+    #no Bluetooth LE support on Windows and OSX
+    if self.ble and ("Linux" not in platform.uname()):
+      sys.stdout.write("Bluetooth LE is not supported on the current platform")
+      sys.stdout.flush()
+      self.ble = False
+
   def connect(self):
-    self.bt = BTInterface(self.target_name, self.target_address)
+    if self.ble:
+      self.bt = BTInterfaceLE(self.target_name, self.target_address)
+    else:
+      self.bt = BTInterfaceClassic(self.target_name, self.target_address)
     self.is_connected = self.bt.connect()
     return True
 
@@ -283,7 +378,7 @@ class Sphero(threading.Thread):
 
   def clamp(self, n, minn, maxn):
     return max(min(maxn, n), minn)
-    
+
   def ping(self, response):
     """
     The Ping command is used to verify both a solid data link with the
@@ -559,7 +654,7 @@ class Sphero(threading.Thread):
     """
     Helper function to add all the filtered data to the data strm
     mask, so that the user doesn't have to set the data strm manually.
-    
+
     :param sample_div: divisor of the maximum sensor sampling rate.
     :param sample_frames: number of sample frames emitted per packet.
     :param pcnt: packet count (set to 0 for unlimited streaming).
@@ -578,7 +673,7 @@ class Sphero(threading.Thread):
     """
     Helper function to add all the raw data to the data strm mask, so
     that the user doesn't have to set the data strm manually.
-    
+
     :param sample_div: divisor of the maximum sensor sampling rate.
     :param sample_frames: number of sample frames emitted per packet.
     :param pcnt: packet count (set to 0 for unlimited streaming).
@@ -598,7 +693,7 @@ class Sphero(threading.Thread):
     """
     Helper function to add all the data to the data strm mask, so
     that the user doesn't have to set the data strm manually.
-    
+
     :param sample_div: divisor of the maximum sensor sampling rate.
     :param sample_frames: number of sample frames emitted per packet.
     :param pcnt: packet count (set to 0 for unlimited streaming).
@@ -723,9 +818,9 @@ class Sphero(threading.Thread):
       | SOP1 | SOP2 | DID | CID | SEQ | DLEN | <data> | CHK |
       -------------------------------------------------------
 
-    * SOP1 - start packet 1 - Always 0xff. 
+    * SOP1 - start packet 1 - Always 0xff.
     * SOP2 - start packet 2 - Set to 0xff when an acknowledgement is\
-      expected, 0xfe otherwise.    
+      expected, 0xfe otherwise.
     * DID - Device ID
     * CID - Command ID
     * SEQ - Sequence Number - This client field is echoed in the\
@@ -816,7 +911,7 @@ class Sphero(threading.Thread):
           else:
             break
             #print "Response packet", self.data2hexstr(data_packet)
-         
+
         elif data[:2] == RECV['ASYNC']:
           data_length = (ord(data[3])<<8)+ord(data[4])
           if data_length+5 <= len(data):
@@ -846,10 +941,10 @@ class Sphero(threading.Thread):
       |State |
       --------
 
-    The power state byte: 
-      * 01h = Battery Charging, 
+    The power state byte:
+      * 01h = Battery Charging,
       * 02h = Battery OK,
-      * 03h = Battery Low, 
+      * 03h = Battery Low,
       * 04h = Battery Critical
     '''
     return struct.unpack_from('B', ''.join(data[5:]))[0]
@@ -880,7 +975,7 @@ class Sphero(threading.Thread):
     this value.
     '''
     output={}
-    
+
     output['X'], output['Y'], output['Z'], output['Axis'], output['xMagnitude'], output['yMagnitude'], output['Speed'], output['Timestamp'] = struct.unpack_from('>hhhbhhbI', ''.join(data[5:]))
     return output
 
@@ -899,5 +994,3 @@ class Sphero(threading.Thread):
     self.is_connected = False
     self.bt.close()
     return self.is_connected
-
-
