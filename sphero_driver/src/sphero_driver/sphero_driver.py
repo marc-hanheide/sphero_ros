@@ -41,7 +41,8 @@ import platform
 
 from abc import ABCMeta, abstractmethod
 if "Linux" in platform.uname():         #Bluepy Bluetooth LE library currently only supported on Linux
-    from bluepy import btle, Scanner, DefaultDelegate
+    from bluepy import btle
+    from bluepy.btle import Scanner, DefaultDelegate
 
 #These are the message response code that can be return by Sphero.
 MRSP = dict(
@@ -246,33 +247,69 @@ class BTInterfaceClassic(BTInterface):
 
 class BTInterfaceLE(BTInterface):
 
-  def __init__(self, target_name = 'BB', target_addr = None, port = 1):
+  class ScanDelegate(DefaultDelegate):
+    """
+    Helper class for handling bluetooth device scanning in LE mode.
+    Adapted from sample code in the Bluepy docs.
+    Needed because DefaultDelegate does not have a handleDiscovery method;
+    even though we don't actually do anything with it, its presence is still
+    required for scanner.scan to work.
+    """
+    def __init__(self):
+        DefaultDelegate.__init__(self)
+
+    def handleDiscovery(self, dev, isNewDev, isNewData):
+        pass
+
+  def __init__(self, target_name = 'BB', target_addr = None, port = 0):
     self.target_name = target_name
     self.port = port
     self.found_device = False
     self.tries = 0
     self.target_address = target_addr
     self.peripheral = None
+    self.sphero_service = None
+    #Service and characterstic UUID values taken from official Sphero JavaScript library
+    self.UUIDs = dict(
+      BLE_SVC = "22bb746f2bb075542d6f726568705327",
+      WAKE_CHAR = "22bb746f2bbf75542d6f726568705327",
+      TX_PWR_CHAR = "22bb746f2bb275542d6f726568705327",
+      ANTI_DOS_CHAR = "22bb746f2bbd75542d6f726568705327",
+      BOT_CTRL_SVC = "22bb746f2ba075542d6f726568705327",
+      CMD_CHAR = "22bb746f2ba175542d6f726568705327",
+      RESP_CHAR = "22bb746f2ba675542d6f726568705327"
+    )
+    self.ble_service = None
+    self.wake_characteristic = None
+    self.tx_power_characteristic = None
+    self.anti_dos_characteristic = None
+    self.robot_control_service = None
+    self.commands_characteristic = None
+    self.response_characteristic = None
 
-def connect(self):
+
+  def connect(self):
     if self.target_address is None:
         sys.stdout.write("Searching for devices....")
         sys.stdout.flush()
 
-        for i in range(10):
-          sys.stdout.write("....")
-          sys.stdout.flush()
-          nearby_devices = bluetooth.discover_devices(lookup_names = True)
+        scanner = Scanner(self.port)
+        scanner.withDelegate(ScanDelegate())
+        nearby_devices = scanner.scan(10)
 
-          if len(nearby_devices)>0:
-            for bdaddr, name in nearby_devices:
-              #look for a device name that starts with Sphero
-              if name.startswith(self.target_name):
+        if len(nearby_devices)>0:
+          for dev in nearby_devices:
+            #look for a device name that starts with the specified target name
+            for (adtype, desc, value) in dev.getScanData():
+              #one of the data points returned by getScanData is the device's
+              #human-readable name. This is what we want to match against to see
+              #if we have discovered a Sphero device.
+              if value.startswith(self.target_name):
                 self.found_device = True
-                self.target_address = bdaddr
+                self.target_address = dev.addr
                 break
-          if self.found_device:
-            break
+              if self.found_device:
+                break
 
         if self.target_address is not None:
           sys.stdout.write("\nFound Sphero device with address: %s\n" %  (self.target_address))
@@ -285,25 +322,34 @@ def connect(self):
         sys.stdout.write("Connecting to device: " + self.target_address + "...")
 
     try:
-      self.sock=bluetooth.BluetoothSocket(bluetooth.RFCOMM)
-      self.sock.connect((self.target_address,self.port))
-    except bluetooth.btcommon.BluetoothError as error:
+      #Connect to sphero and populate services and characteristics
+      self.peripheral = btle.Peripheral(self.target_address, addrType=btle.ADDR_TYPE_RANDOM)
+      sys.stdout.write("Connected! Finding services...")
+      sys.stdout.flush()
+      self.ble_service = self.peripheral.getServiceByUUID(self.UUIDs['BLE_SVC'])
+      self.robot_control_service = self.peripheral.getServiceByUUID(self.UUIDs['BOT_CTRL_SVC'])
+      self.wake_characteristic = self.ble_service.getCharacteristics(self.UUIDs['WAKE_CHAR'])[0]
+      self.tx_power_characteristic = self.ble_service.getCharacteristics(self.UUIDs['TX_PWR_CHAR'])[0]
+      self.anti_dos_characteristic = self.ble_service.getCharacteristics(self.UUIDs['ANTI_DOS_CHAR'])[0]
+      self.commands_characteristic = self.robot_control_service.getCharacteristics(self.UUIDs['CMD_CHAR'])[0]
+      self.response_characteristic = self.robot_control_service.getCharacteristics(self.UUIDs['RESP_CHAR'])[0]
+    except btle.BTLEException as error:
       sys.stdout.write(error.strerror)
       sys.stdout.flush()
       time.sleep(5.0)
       sys.exit(1)
-    sys.stdout.write("Paired with Sphero.\n")
+    sys.stdout.write("Done.\n")
     sys.stdout.flush()
     return True
 
   def send(self, data):
-    self.sock.send(data)
+    self.commands_characteristic.write(data)
 
   def recv(self, num_bytes):
-    return self.sock.recv(num_bytes)
+    return self.response_characteristic.read()
 
   def close(self):
-    self.sock.close()
+    self.peripheral.disconnect()
 
 class Sphero(threading.Thread):
 
