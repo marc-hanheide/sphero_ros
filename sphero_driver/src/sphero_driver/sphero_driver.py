@@ -324,7 +324,7 @@ class BTInterfaceLE(BTInterface):
     try:
       #Connect to sphero and populate services and characteristics
       self.peripheral = btle.Peripheral(self.target_address, addrType=btle.ADDR_TYPE_RANDOM)
-      sys.stdout.write("Connected! Finding services...")
+      sys.stdout.write("Connected!\nFinding services...")
       sys.stdout.flush()
       self.ble_service = self.peripheral.getServiceByUUID(self.UUIDs['BLE_SVC'])
       self.robot_control_service = self.peripheral.getServiceByUUID(self.UUIDs['BOT_CTRL_SVC'])
@@ -333,6 +333,9 @@ class BTInterfaceLE(BTInterface):
       self.anti_dos_characteristic = self.ble_service.getCharacteristics(self.UUIDs['ANTI_DOS_CHAR'])[0]
       self.commands_characteristic = self.robot_control_service.getCharacteristics(self.UUIDs['CMD_CHAR'])[0]
       self.response_characteristic = self.robot_control_service.getCharacteristics(self.UUIDs['RESP_CHAR'])[0]
+      sys.stdout.write("Services found!\nEnabling dev mode...")
+      sys.stdout.flush()
+      self._enable_dev_mode()
     except btle.BTLEException as error:
       sys.stdout.write(error.strerror)
       sys.stdout.flush()
@@ -350,6 +353,16 @@ class BTInterfaceLE(BTInterface):
 
   def close(self):
     self.peripheral.disconnect()
+
+  def _enable_dev_mode(self):
+    """
+    In order to receive commands, the BB-8 or Ollie must first be put into developer mode.
+    This is done by sending a special string to the anti-dos characteristic, setting TX
+    power to 7, and telling the device to wake up.
+    """
+    self.anti_dos_characteristic.write('011i3', True)
+    self.tx_power_characteristic.write(chr(7), True)
+    self.wake_characteristic.write(chr(1), True)
 
 class Sphero(threading.Thread):
 
