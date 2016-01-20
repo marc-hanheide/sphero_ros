@@ -244,10 +244,8 @@ class BTInterfaceClassic(BTInterface):
 
   def close(self):
     self.sock.close()
-
-class BTInterfaceLE(BTInterface):
-
-  class ScanDelegate(DefaultDelegate):
+    
+class ScanDelegate(DefaultDelegate):
     """
     Helper class for handling bluetooth device scanning in LE mode.
     Adapted from sample code in the Bluepy docs.
@@ -260,6 +258,8 @@ class BTInterfaceLE(BTInterface):
 
     def handleDiscovery(self, dev, isNewDev, isNewData):
         pass
+
+class BTInterfaceLE(BTInterface):
 
   def __init__(self, target_name = 'BB', target_addr = None, port = 0):
     self.target_name = target_name
