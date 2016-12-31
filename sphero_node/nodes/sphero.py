@@ -80,7 +80,10 @@ class SpheroNode(object):
         self.is_connected = False
         self._init_pubsub()
         self._init_params()
-        self.robot = sphero_driver.Sphero()
+        name = rospy.get_param('~name', 'Sphero')
+        addr = rospy.get_param('~address', None)
+        ble = rospy.get_param('~ble', False)
+        self.robot = sphero_driver.Sphero(name, addr, ble)
         self.imu = Imu()
         self.imu.orientation_covariance = [1e-6, 0, 0, 0, 1e-6, 0, 0, 0, 1e-6]
         self.imu.angular_velocity_covariance = [1e-6, 0, 0, 0, 1e-6, 0, 0, 0, 1e-6]
