@@ -457,7 +457,7 @@ class BTInterfaceLE(BTInterface):
 
 class Sphero(threading.Thread):
 
-  def __init__(self, target_name = 'BB', target_addr = None, ble = True):
+  def __init__(self, target_name = 'Sphero', target_addr = None, ble = False):
     threading.Thread.__init__(self)
     self.target_name = target_name
     self.target_address = target_addr
