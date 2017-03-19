@@ -80,9 +80,9 @@ class SpheroNode(object):
         self.is_connected = False
         self._init_pubsub()
         self._init_params()
-        name = rospy.get_param('~name', 'Sphero')
+        name = rospy.get_param('~name', 'BB')
         addr = rospy.get_param('~address', None)
-        ble = rospy.get_param('~ble', False)
+        ble = rospy.get_param('~ble', True)
         self.robot = sphero_driver.Sphero(name, addr, ble)
         self.imu = Imu()
         self.imu.orientation_covariance = [1e-6, 0, 0, 0, 1e-6, 0, 0, 0, 1e-6]
@@ -200,6 +200,7 @@ class SpheroNode(object):
             self.power_state_msg = self.battery_state[data]
 
     def parse_data_strm(self, data):
+        print("parse")
         if self.is_connected:
             now = rospy.Time.now()
             imu = Imu(header=rospy.Header(frame_id="imu_link"))
